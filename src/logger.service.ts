@@ -13,6 +13,15 @@ export enum NgxLoggerLevel {
   TRACE = 0, DEBUG, INFO, LOG, WARN, ERROR, OFF
 }
 
+export interface Log {
+    level: string,
+    message: string,
+    additional: Array<string | null | undefined>,
+    timestamp: string;
+}
+
+export type SaveLogAdapter = (log: Log) => void;
+
 const Levels = [
   'TRACE',
   'DEBUG',
@@ -28,8 +37,14 @@ export class NGXLogger {
   private _serverLogLevel: NgxLoggerLevel;
   private _clientLogLevel: NgxLoggerLevel;
   private _isIE: boolean;
+  private _saveLogAdapter: SaveLogAdapter;
+  private _saveToServerAdapter: SaveLogAdapter = (logObject) => this.sendToServer(logObject);
 
-  constructor(private readonly http: HttpClient, @Inject(PLATFORM_ID) private readonly platformId, @Optional() private readonly options?: LoggerConfig) {
+  constructor( private readonly http: HttpClient,
+               @Inject(PLATFORM_ID) private readonly platformId,
+               @Optional() private readonly options?: LoggerConfig
+  ) {
+    this._saveLogAdapter = this._saveToServerAdapter;
     this.options = this.options ? this.options : {
       level: NgxLoggerLevel.OFF,
       serverLogLevel: NgxLoggerLevel.OFF
@@ -68,13 +83,20 @@ export class NGXLogger {
     return new Date().toISOString();
   }
 
-  private _logOnServer(level: NgxLoggerLevel, message, additional: any[] = []): void {
-    // If the loggingUrl is not set or if the user provides a serverLogLevel and the current level is than that, do not log.
-    if (!this.options.serverLoggingUrl || level < this._serverLogLevel) {
+  private _saveLog(level: NgxLoggerLevel, message, additional: any[] = []): void {
+
+    // If the loggingUrl is not set and the logging adapter is set to the default server adapter
+    // the serverLoggingUrl is used for the _saveToServerAdapter
+    if (!this.options.serverLoggingUrl && this._saveLogAdapter === this._saveToServerAdapter) {
       return;
     }
 
-    const headers = new HttpHeaders().set('Content-Type', 'application/json');
+    // if the user provides a serverLogLevel and the current level is than that, do not log.
+    if (level < this._serverLogLevel) {
+        return;
+    }
+
+
 
     let messageToLog = '';
 
@@ -99,20 +121,32 @@ export class NGXLogger {
       });
     }
 
-    this.http.post(this.options.serverLoggingUrl,
-      {
+    // call the assigned storage method
+    this._saveLogAdapter({
         level: Levels[level],
         message: messageToLog,
         additional: additionalToLog,
         timestamp: this._timestamp()
-      },
-      {
-        headers
-      })
-      .subscribe(
-        (res: any) => this._log(NgxLoggerLevel.TRACE, false, 'Server logging successful', [res]),
-        (error: HttpErrorResponse) => this._log(NgxLoggerLevel.ERROR, false, 'FAILED TO LOG ON SERVER', [error])
-      );
+    });
+
+  }
+
+    /**
+     * Set the adapter that should be called when a log needs to be saved
+     * @param adapter
+     */
+  public setStorageMethod(adapter: SaveLogAdapter) {
+      this._saveLogAdapter = adapter;
+  }
+
+
+  private sendToServer(logObject) {
+      const headers = new HttpHeaders().set('Content-Type', 'application/json');
+      this.http.post(this.options.serverLoggingUrl, logObject, { headers })
+          .subscribe(
+              (res: any) => this._log(NgxLoggerLevel.TRACE, false, 'Server logging successful', [res]),
+              (error: HttpErrorResponse) => this._log(NgxLoggerLevel.ERROR, false, 'FAILED TO LOG ON SERVER', [error])
+          );
   }
 
   private _logIE(level: NgxLoggerLevel, message: string, additional: any[] = []): void {
@@ -138,7 +172,7 @@ export class NGXLogger {
 
     // Allow logging on server even if client log level is off
     if (logOnServer) {
-      this._logOnServer(level, message, additional);
+      this._saveLog(level, message, additional);
     }
 
     // if no message or the log level is less than the environ

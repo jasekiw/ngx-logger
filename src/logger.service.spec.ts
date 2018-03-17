@@ -1,7 +1,7 @@
 /* tslint:disable:no-unused-variable */
 
 import { TestBed, async, inject } from '@angular/core/testing';
-import { NGXLogger } from './logger.service';
+import {NGXLogger, SaveLogAdapter} from './logger.service';
 import {} from 'jasmine';
 
 describe('NGXLogger', () => {
@@ -14,4 +14,12 @@ describe('NGXLogger', () => {
   it('should ...', inject([NGXLogger], (service: NGXLogger) => {
     expect(service).toBeTruthy();
   }));
+
+  it('should attempt to save', inject([NGXLogger], (service: NGXLogger) => {
+      let mockFunction: SaveLogAdapter = (logObject) => {
+          expect(logObject.message).toContain('testMessage');
+      };
+      spyOn(service, '_saveLogAdapter').and.callFake(mockFunction);
+  }));
+
 });
